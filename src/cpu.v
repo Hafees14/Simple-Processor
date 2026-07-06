@@ -1,21 +1,31 @@
-// Computer Architecture CO2070 - Lab 04
-// Design: Top-Level CPU Module with Flow Control (j and beq)
+// Computer Architecture CO2070 - Lab 04.5
+// Design: Top-Level CPU Module – Extended ISA
 // Team  : 06
 // Members : E/22/014, E/22/035
 
-// OPCODE table (from CO2070Assembler.c):
+// OPCODE table (from CO2070Assembler.c + Lab 4.5 extensions):
 //   8'b00000000  loadi
 //   8'b00000001  mov
 //   8'b00000010  add
 //   8'b00000011  sub
 //   8'b00000100  and
 //   8'b00000101  or
+//   8'b00000110  j
+//   8'b00000111  beq
+//   8'b00001000  mult   [Lab 4_5]  RD = RT * RS
+//   8'b00001001  sll    [Lab 4_5]  RD = RT << IMM
+//   8'b00001010  srl    [Lab 4_5]  RD = RT >> IMM  (logical)
+//   8'b00001011  sra    [Lab 4_5]  RD = RT >>> IMM (arithmetic)
+//   8'b00001100  ror    [Lab 4_5]  RD = rotate_right(RT, IMM)
+//   8'b00001101  bne    [Lab 4_5]  branch if RT != RS
 
 // ALU SELECT encoding:
 //   3'b000  forward DATA2   (mov, loadi)
-//   3'b001  add             (add, sub)
+//   3'b001  add             (add, sub, beq, bne)
 //   3'b010  and             (and)
 //   3'b011  or              (or)
+//   3'b100  multiply        (mult)
+//   3'b101  shift / rotate  (sll, srl, sra, ror)
 
 // Timing per the lab diagram (single-cycle, 8 time-unit clock period):
 //   PC Update            #1
@@ -24,7 +34,7 @@
 //   Decode               #1
 //   2's Complement       #1  (sub only, in parallel with register read)
 //   Register Read        #2  (in reg_file)
-//   ALU                  #2  (add/sub) or #1 (and/or/mov/loadi)
+//   ALU                  #2  (add/sub/mult/shift/rotate) or #1 (and/or/mov/loadi)
 //   Register Write       #1  (in reg_file)
 //   PC+4 Adder           #1  (runs in parallel with mem read)
 
@@ -51,22 +61,31 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
     wire [7:0]  RD_ADDR;          // bits [23:16]
     wire [7:0]  RT_ADDR;          // bits [15:8]
     wire [7:0]  RS_ADDR;          // bits [7:0]
-    wire [7:0]  IMMEDIATE;        // bits [7:0]   -- same field as RS_ADDR, used by loadi
+    wire [7:0]  IMMEDIATE;        // bits [7:0]   -- same field as RS_ADDR, used by loadi/sll/srl/sra/ror
 
     // Decode
     assign OPCODE    = INSTRUCTION[31:24];
     assign RD_ADDR   = INSTRUCTION[23:16];   // full 8-bit field; register address uses [2:0]
     assign RT_ADDR   = INSTRUCTION[15:8];
     assign RS_ADDR   = INSTRUCTION[7:0];
-    assign IMMEDIATE = INSTRUCTION[7:0];     // same bits -- used by loadi
+    assign IMMEDIATE = INSTRUCTION[7:0];     // same bits -- used by loadi and shift-amount
 
     // Control signals (all generated combinationally after decode)
     reg [2:0] ALUOP;         // selects ALU operation
     reg       WRITEENABLE;   // enables register-file write
-    reg       MUX_IMM_SEL;   // 1 = feed IMMEDIATE into ALU DATA2  (loadi)
-    reg       MUX_NEG_SEL;   // 1 = negate REGOUT2 before ALU      (sub, beq)
+    reg       MUX_IMM_SEL;   // 1 = feed IMMEDIATE into ALU DATA2  (loadi, sll, srl, sra, ror)
+    reg       MUX_NEG_SEL;   // 1 = negate REGOUT2 before ALU      (sub, beq, bne)
     reg       JUMP;          // 1 = unconditional jump (j)
     reg       BRANCH;        // 1 = conditional branch  (beq)
+
+    // Lab 4_5 auxiliary control signals for the barrel_unit
+    reg       SHIFT_DIR;     // 0 = left, 1 = right  (sll vs srl/sra)
+    reg       ARITH;         // 0 = logical, 1 = arithmetic right shift (sra)
+    reg       ROTATE;        // 0 = shift, 1 = rotate right (ror)
+
+    // Lab 4_5: BNE branch control
+    // BNE branches when the ALU result is NOT zero (opposite of beq).
+    reg       BRANCH_NE;     // 1 = conditional branch if NOT zero (bne)
 
 
     // PC Next-value Logic 
@@ -94,14 +113,16 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
     assign #2 BRANCH_TARGET = PC_PLUS4 + OFFSET_EXTENDED;
 
     // ZERO flag from ALU – used by beq to detect RT == RS
+    // Lab 4_5: also used by bne to detect RT != RS
     wire ZERO;
 
     // PC_SEL decides what goes into the PC register next cycle:
-    //   j          -> always take the jump target
-    //   beq + ZERO -> take the branch target only when registers are equal
-    //   otherwise  -> take PC + 4 (sequential)
+    //   j               -> always take the jump target
+    //   beq + ZERO      -> take the branch target only when registers are equal
+    //   bne + !ZERO     -> take the branch target only when registers are NOT equal [Lab 4_5]
+    //   otherwise       -> take PC + 4 (sequential)
     wire PC_SEL;
-    assign PC_SEL = JUMP | (BRANCH & ZERO);
+    assign PC_SEL = JUMP | (BRANCH & ZERO) | (BRANCH_NE & ~ZERO);
 
     // Next PC mux: feeds the PC module
     wire [31:0] PC_NEXT;
@@ -150,18 +171,22 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
 
     // MUX 2: select between MUX1_OUT and IMMEDIATE
     //   MUX_IMM_SEL = 0  ->  MUX1_OUT   (register instructions)
-    //   MUX_IMM_SEL = 1  ->  IMMEDIATE  (loadi)
+    //   MUX_IMM_SEL = 1  ->  IMMEDIATE  (loadi, sll, srl, sra, ror)
     wire [7:0] ALU_DATA2;
     assign ALU_DATA2 = (MUX_IMM_SEL) ? IMMEDIATE : MUX1_OUT;
 
 
     // ALU instantiation
+    // Lab 4.5: three new auxiliary ports SHIFT_DIR, ARITH, ROTATE added.
     alu myalu(
-        .DATA1  (REGOUT1),
-        .DATA2  (ALU_DATA2),
-        .RESULT (ALURESULT),
-        .SELECT (ALUOP),
-        .ZERO   (ZERO)
+        .DATA1     (REGOUT1),
+        .DATA2     (ALU_DATA2),
+        .RESULT    (ALURESULT),
+        .SELECT    (ALUOP),
+        .ZERO      (ZERO),
+        .SHIFT_DIR (SHIFT_DIR),
+        .ARITH     (ARITH),
+        .ROTATE    (ROTATE)
     );
 
 
@@ -178,6 +203,10 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
         ALUOP       = 3'b000;
         JUMP        = 1'b0;
         BRANCH      = 1'b0;
+        BRANCH_NE   = 1'b0;   // Lab 4_5
+        SHIFT_DIR   = 1'b0;   // Lab 4_5
+        ARITH       = 1'b0;   // Lab 4_5
+        ROTATE      = 1'b0;   // Lab 4_5
 
         // Apply decode latency of 1 time unit
         #1;
@@ -286,6 +315,113 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
                 BRANCH      = 1'b1;   // branch if ALU result is zero
             end
 
+            // ── Lab 4_5 Extended Instructions ───────────────────────────────
+
+            // mult  RD, RT, RS
+            // ALURESULT = REGOUT1 * REGOUT2  (lower 8 bits)
+            // Opcode: 8'b00001000
+            // ALU SELECT = 3'b100 routes to mult_unit.
+            // Both register operands are used; IMMEDIATE not needed.
+            // Latency: decode #1 + reg-read #2 + mult #2 + write #1 = 6 ≤ 8. OK.
+
+            8'b00001000:
+            begin
+                WRITEENABLE = 1'b1;
+                MUX_IMM_SEL = 1'b0;   // use register operands
+                MUX_NEG_SEL = 1'b0;
+                ALUOP       = 3'b100;  // multiply
+            end
+
+            // sll  RD, RT, IMM
+            // ALURESULT = REGOUT1 << IMM  (logical left shift)
+            // Opcode: 8'b00001001
+            // ALU SELECT = 3'b101 routes to barrel_unit.
+            // SHIFT_DIR=0 (left), ARITH=0, ROTATE=0.
+            // IMM (bits[7:0]) carries the shift amount into ALU DATA2 via MUX_IMM_SEL.
+            // RT carries the value to shift; RS field is unused (holds IMM).
+            // Latency: decode #1 + reg-read #2 + barrel #2 + write #1 = 6 ≤ 8. OK.
+
+            8'b00001001:
+            begin
+                WRITEENABLE = 1'b1;
+                MUX_IMM_SEL = 1'b1;   // shift amount from immediate field
+                MUX_NEG_SEL = 1'b0;
+                ALUOP       = 3'b101;  // barrel shift / rotate
+                SHIFT_DIR   = 1'b0;   // left
+                ARITH       = 1'b0;   // logical
+                ROTATE      = 1'b0;   // shift, not rotate
+            end
+
+            // srl  RD, RT, IMM
+            // ALURESULT = REGOUT1 >> IMM  (logical right shift)
+            // Opcode: 8'b00001010
+            // ALU SELECT = 3'b101 routes to barrel_unit.
+            // SHIFT_DIR=1 (right), ARITH=0, ROTATE=0.
+
+            8'b00001010:
+            begin
+                WRITEENABLE = 1'b1;
+                MUX_IMM_SEL = 1'b1;   // shift amount from immediate field
+                MUX_NEG_SEL = 1'b0;
+                ALUOP       = 3'b101;  // barrel shift / rotate
+                SHIFT_DIR   = 1'b1;   // right
+                ARITH       = 1'b0;   // logical (zero fill)
+                ROTATE      = 1'b0;   // shift, not rotate
+            end
+
+            // sra  RD, RT, IMM
+            // ALURESULT = REGOUT1 >>> IMM  (arithmetic right shift, sign-extend)
+            // Opcode: 8'b00001011
+            // ALU SELECT = 3'b101 routes to barrel_unit.
+            // SHIFT_DIR=1, ARITH=1, ROTATE=0.
+
+            8'b00001011:
+            begin
+                WRITEENABLE = 1'b1;
+                MUX_IMM_SEL = 1'b1;   // shift amount from immediate field
+                MUX_NEG_SEL = 1'b0;
+                ALUOP       = 3'b101;  // barrel shift / rotate
+                SHIFT_DIR   = 1'b1;   // right
+                ARITH       = 1'b1;   // arithmetic (sign-bit fill)
+                ROTATE      = 1'b0;   // shift, not rotate
+            end
+
+            // ror  RD, RT, IMM
+            // ALURESULT = rotate_right(REGOUT1, IMM)
+            // Opcode: 8'b00001100
+            // ALU SELECT = 3'b101 routes to barrel_unit.
+            // ROTATE=1; SHIFT_DIR and ARITH are don't-cares (ROTATE overrides).
+
+            8'b00001100:
+            begin
+                WRITEENABLE = 1'b1;
+                MUX_IMM_SEL = 1'b1;   // rotate amount from immediate field
+                MUX_NEG_SEL = 1'b0;
+                ALUOP       = 3'b101;  // barrel shift / rotate
+                SHIFT_DIR   = 1'b1;   // don't-care when ROTATE=1
+                ARITH       = 1'b0;   // don't-care when ROTATE=1
+                ROTATE      = 1'b1;   // rotate right
+            end
+
+            // bne  OFFSET, RT, RS
+            // Branch if RT != RS: PC = (PC+4) + sign_ext(OFFSET) * 4
+            // RT != RS is detected by subtracting RS from RT and checking ~ZERO.
+            // Opcode: 8'b00001101
+            // OFFSET is in RD_ADDR (bits [23:16]).
+            // WRITEENABLE stays 0 – registers are compared, not written.
+            // BRANCH_NE = 1 enables the ~ZERO check in the PC mux.
+
+            8'b00001101:
+            begin
+                WRITEENABLE = 1'b0;
+                MUX_IMM_SEL = 1'b0;
+                MUX_NEG_SEL = 1'b1;   // negate RS so ALU computes RT - RS
+                ALUOP       = 3'b001;  // subtract to produce ZERO flag
+                JUMP        = 1'b0;
+                BRANCH      = 1'b0;
+                BRANCH_NE   = 1'b1;   // branch if ALU result is NOT zero
+            end
+
             // Default: unrecognised opcode -- do nothing, don't write
             
             default:
@@ -296,6 +432,10 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
                 ALUOP       = 3'b000;
                 JUMP        = 1'b0;
                 BRANCH      = 1'b0;
+                BRANCH_NE   = 1'b0;
+                SHIFT_DIR   = 1'b0;
+                ARITH       = 1'b0;
+                ROTATE      = 1'b0;
             end
 
         endcase
