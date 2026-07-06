@@ -1,0 +1,183 @@
+$date
+	Sat Jun 06 22:06:37 2026
+$end
+$version
+	Icarus Verilog
+$end
+$timescale
+	1s
+$end
+$scope module alu_tb $end
+$var wire 8 ! RESULT [7:0] $end
+$var reg 8 " DATA1 [7:0] $end
+$var reg 8 # DATA2 [7:0] $end
+$var reg 3 $ SELECT [2:0] $end
+$scope module myalu $end
+$var wire 8 % DATA1 [7:0] $end
+$var wire 8 & DATA2 [7:0] $end
+$var wire 3 ' SELECT [2:0] $end
+$var wire 8 ( or_result [7:0] $end
+$var wire 8 ) forward_result [7:0] $end
+$var wire 8 * and_result [7:0] $end
+$var wire 8 + add_result [7:0] $end
+$var reg 8 , RESULT [7:0] $end
+$scope module a1 $end
+$var wire 8 - DATA1 [7:0] $end
+$var wire 8 . DATA2 [7:0] $end
+$var reg 8 / RESULT [7:0] $end
+$upscope $end
+$scope module and1 $end
+$var wire 8 0 DATA1 [7:0] $end
+$var wire 8 1 DATA2 [7:0] $end
+$var reg 8 2 RESULT [7:0] $end
+$upscope $end
+$scope module f1 $end
+$var wire 8 3 DATA2 [7:0] $end
+$var reg 8 4 RESULT [7:0] $end
+$upscope $end
+$scope module o1 $end
+$var wire 8 5 DATA1 [7:0] $end
+$var wire 8 6 DATA2 [7:0] $end
+$var reg 8 7 RESULT [7:0] $end
+$upscope $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+$comment Show the parameter values. $end
+$dumpall
+$end
+#0
+$dumpvars
+bx 7
+b101 6
+b1010 5
+bx 4
+b101 3
+bx 2
+b101 1
+b1010 0
+bx /
+b101 .
+b1010 -
+bx ,
+bx +
+bx *
+bx )
+bx (
+b0 '
+b101 &
+b1010 %
+b0 $
+b101 #
+b1010 "
+bx !
+$end
+#1
+b101 !
+b101 ,
+b101 )
+b101 4
+b1111 (
+b1111 7
+b0 *
+b0 2
+#2
+b1111 +
+b1111 /
+#10
+b1111 !
+b1111 ,
+b1 $
+b1 '
+b1111 #
+b1111 &
+b1111 .
+b1111 1
+b1111 3
+b1111 6
+b10100 "
+b10100 %
+b10100 -
+b10100 0
+b10100 5
+#11
+b1111 )
+b1111 4
+b100 *
+b100 2
+b11111 (
+b11111 7
+#12
+b100011 !
+b100011 ,
+b100011 +
+b100011 /
+#20
+b100 !
+b100 ,
+b10 $
+b10 '
+b11001100 #
+b11001100 &
+b11001100 .
+b11001100 1
+b11001100 3
+b11001100 6
+b10101010 "
+b10101010 %
+b10101010 -
+b10101010 0
+b10101010 5
+#21
+b10001000 !
+b10001000 ,
+b11001100 )
+b11001100 4
+b11101110 (
+b11101110 7
+b10001000 *
+b10001000 2
+#22
+b1110110 +
+b1110110 /
+#30
+b11101110 !
+b11101110 ,
+b11 $
+b11 '
+#40
+b0 !
+b0 ,
+b100 $
+b100 '
+b11001 #
+b11001 &
+b11001 .
+b11001 1
+b11001 3
+b11001 6
+b110010 "
+b110010 %
+b110010 -
+b110010 0
+b110010 5
+#41
+b11001 )
+b11001 4
+b10000 *
+b10000 2
+b111011 (
+b111011 7
+#42
+b1001011 +
+b1001011 /
+#50
+b101 $
+b101 '
+#60
+b110 $
+b110 '
+#70
+b111 $
+b111 '
+#80
