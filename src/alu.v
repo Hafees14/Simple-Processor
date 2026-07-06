@@ -12,6 +12,7 @@
 // Unused SELECT values are handled safely
 // by sending 0 to the output.
 
+`timescale 1ns/100ps
 
 // Forward Unit
 // RESULT = DATA2

@@ -6,6 +6,8 @@
 
 // Register File Module
 
+`timescale 1ns/100ps
+
 module reg_file(
     IN,
     OUT1,
@@ -124,5 +126,7 @@ begin
 end
 
 endmodule
+
+
 
 
