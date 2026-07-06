@@ -1,44 +1,48 @@
-// Computer Architecture CO2070 - Lab 03
-// Design: Program Counter (PC) Module
+// Computer Architecture CO2070 - Lab 04
+// Design: Program Counter (PC) Module with Branch/Jump Support
 // Team  : 06
 // Members : E/22/014, E/22/035
 
+// PC now accepts an external PC_IN so the cpu can mux between
+// PC+4 (sequential) and the branch/jump target.
+// PC_SEL = 0  :  PC_IN = PC + 4   (normal sequential execution)
+// PC_SEL = 1  :  PC_IN = branch/jump target from the branch adder
+
 `timescale 1ns/100ps
 
-module pc(PC, CLK, RESET);
+module pc(PC, PC_IN, CLK, RESET);
 
-    // Outputs
+    // Current PC value visible to instruction memory and cpu
     output reg [31:0] PC;
 
-    // Inputs
+    // Next PC already selected by the cpu-level mux (PC+4 or branch target)
+    input  [31:0] PC_IN;
+
     input         CLK;
     input         RESET;
 
 
     // PC + 4 adder
-    // Runs in parallel with instruction memory read (#1 delay)
-    
-    wire [31:0] PC_NEXT;
-    assign #1 PC_NEXT = PC + 32'd4;
+    // Runs in parallel with instruction memory read (#1 latency per timing diagram)
+
+    wire [31:0] PC_PLUS4;
+    assign #1 PC_PLUS4 = PC + 32'd4;
 
 
-    // PC Register
-    // Synchronous update on positive clock edge.
-    // RESET overrides the next PC value with 0 to restart execution.
-    // Normal operation: PC <- PC + 4  (every instruction is 4 bytes)
+    // PC register: synchronous update on rising clock edge
 
     always @(posedge CLK)
     begin
 
         if (RESET)
         begin
-            // Reset latency = 1 time unit (same as regular PC write)
+            // Restart execution from address 0
             #1 PC = 32'b0;
         end
         else
         begin
-            // Advance to next instruction (PC+4 already computed by the adder)
-            #1 PC = PC_NEXT;
+            // Load whichever PC source the cpu selected
+            #1 PC = PC_IN;
         end
 
     end

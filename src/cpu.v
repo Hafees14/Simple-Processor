@@ -1,5 +1,5 @@
-// Computer Architecture CO2070 - Lab 03
-// Design: Top-Level CPU Module - Control & Integration
+// Computer Architecture CO2070 - Lab 04
+// Design: Top-Level CPU Module with Flow Control (j and beq)
 // Team  : 06
 // Members : E/22/014, E/22/035
 
@@ -20,13 +20,13 @@
 // Timing per the lab diagram (single-cycle, 8 time-unit clock period):
 //   PC Update            #1
 //   Instruction Mem Read #2  (in testbench)
+//   PC+4 Adder             #1   (runs in parallel with mem read, inside pc.v)
 //   Decode               #1
 //   2's Complement       #1  (sub only, in parallel with register read)
 //   Register Read        #2  (in reg_file)
 //   ALU                  #2  (add/sub) or #1 (and/or/mov/loadi)
 //   Register Write       #1  (in reg_file)
 //   PC+4 Adder           #1  (runs in parallel with mem read)
-
 
 `include "alu.v"
 `include "reg_file.v"
@@ -48,50 +48,87 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
     // Wires coming out of the instruction decode stage
 
     wire [7:0]  OPCODE;           // bits [31:24]
-    wire [2:0]  RD_ADDR;          // bits [23:21]
-    wire [2:0]  RT_ADDR;          // bits [15:13] 
-    wire [2:0]  RS_ADDR;          // bits [7:5]   
-    wire [7:0]  IMMEDIATE;        // bits [7:0]   
+    wire [7:0]  RD_ADDR;          // bits [23:16]
+    wire [7:0]  RT_ADDR;          // bits [15:8]
+    wire [7:0]  RS_ADDR;          // bits [7:0]
+    wire [7:0]  IMMEDIATE;        // bits [7:0]   -- same field as RS_ADDR, used by loadi
 
     // Decode
     assign OPCODE    = INSTRUCTION[31:24];
-    assign RD_ADDR   = INSTRUCTION[23:16];   // 8-bit field; reg file uses [2:0]
+    assign RD_ADDR   = INSTRUCTION[23:16];   // full 8-bit field; register address uses [2:0]
     assign RT_ADDR   = INSTRUCTION[15:8];
     assign RS_ADDR   = INSTRUCTION[7:0];
     assign IMMEDIATE = INSTRUCTION[7:0];     // same bits -- used by loadi
 
     // Control signals (all generated combinationally after decode)
+    reg [2:0] ALUOP;         // selects ALU operation
+    reg       WRITEENABLE;   // enables register-file write
+    reg       MUX_IMM_SEL;   // 1 = feed IMMEDIATE into ALU DATA2  (loadi)
+    reg       MUX_NEG_SEL;   // 1 = negate REGOUT2 before ALU      (sub, beq)
+    reg       JUMP;          // 1 = unconditional jump (j)
+    reg       BRANCH;        // 1 = conditional branch  (beq)
 
-    reg [2:0]  ALUOP;            // selects ALU operation
-    reg        WRITEENABLE;      // enables register file write
-    reg        MUX_IMM_SEL;      // 1 = use IMMEDIATE as ALU DATA2 input (loadi)
-    reg        MUX_NEG_SEL;      // 1 = use two's complement of REGOUT2   (sub)
 
-    // PC + 4 adder
-    // Runs in parallel with instruction memory read (#1 delay)
-    // PC register and PC_NEXT adder are encapsulated in the pc module
+    // PC Next-value Logic 
 
+    // PC+4 is computed inside pc.v with #1 delay.
+    // The branch/jump target adder below runs in parallel with the ALU (#2 delay).
+
+    //   Branch/jump target:
+    //   target = (PC + 4) + sign_extended(OFFSET) * 4
+    //   The offset is stored in RD_ADDR (bits[23:16]) for j.
+    //   For beq, it is also stored in RD_ADDR.
+    //   The assembler stores the raw offset value; multiplying by 4 aligns
+    //   the byte address because each instruction is 4 bytes wide.
+
+    // PC+4 wire – computed by the pc module with #1 delay
+    wire [31:0] PC_PLUS4;
+    assign #1 PC_PLUS4 = PC + 32'd4;
+
+    // Sign-extend the 8-bit offset field (RD_ADDR) to 32 bits, then multiply by 4
+    wire [31:0] OFFSET_EXTENDED;
+    assign OFFSET_EXTENDED = {{22{RD_ADDR[7]}}, RD_ADDR, 2'b00};
+
+    // Branch/jump target adder – latency #2 (runs in parallel with ALU)
+    wire [31:0] BRANCH_TARGET;
+    assign #2 BRANCH_TARGET = PC_PLUS4 + OFFSET_EXTENDED;
+
+    // ZERO flag from ALU – used by beq to detect RT == RS
+    wire ZERO;
+
+    // PC_SEL decides what goes into the PC register next cycle:
+    //   j          -> always take the jump target
+    //   beq + ZERO -> take the branch target only when registers are equal
+    //   otherwise  -> take PC + 4 (sequential)
+    wire PC_SEL;
+    assign PC_SEL = JUMP | (BRANCH & ZERO);
+
+    // Next PC mux: feeds the PC module
+    wire [31:0] PC_NEXT;
+    assign PC_NEXT = (PC_SEL) ? BRANCH_TARGET : PC_PLUS4;
+
+    // PC module instantiation
     pc mypc(
         .PC    (PC),
+        .PC_IN (PC_NEXT),
         .CLK   (CLK),
         .RESET (RESET)
     );
 
 
-    // Register file connections
-    
-    wire [7:0] REGOUT1;      // data from source register RT
-    wire [7:0] REGOUT2;      // data from source register RS
-    wire [7:0] ALURESULT;    // result coming out of ALU -- fed back as write data
+    // ── Register File Connections ────────────────────────────────────────────
 
+    wire [7:0] REGOUT1;    // read data from RT (source 1)
+    wire [7:0] REGOUT2;    // read data from RS (source 2)
+    wire [7:0] ALURESULT;  // ALU output, written back to RD
 
     reg_file rf(
         .IN          (ALURESULT),
         .OUT1        (REGOUT1),
         .OUT2        (REGOUT2),
-        .INADDRESS   (RD_ADDR),
-        .OUT1ADDRESS (RT_ADDR),
-        .OUT2ADDRESS (RS_ADDR),
+        .INADDRESS   (RD_ADDR[2:0]),
+        .OUT1ADDRESS (RT_ADDR[2:0]),
+        .OUT2ADDRESS (RS_ADDR[2:0]),
         .WRITE       (WRITEENABLE),
         .CLK         (CLK),
         .RESET       (RESET)
@@ -100,7 +137,6 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
 
     // Two's complement unit
     // Negates REGOUT2 for the sub instruction. Delay = #1.
-
     wire [7:0] NEGATED_REGOUT2;
     assign #1 NEGATED_REGOUT2 = ~REGOUT2 + 8'b00000001;
 
@@ -108,27 +144,24 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
     //   MUX 1: select between REGOUT2 and its two's complement
     //   MUX_NEG_SEL = 0  ->  REGOUT2          (add, and, or, mov)
     //   MUX_NEG_SEL = 1  ->  NEGATED_REGOUT2  (sub)
-    
     wire [7:0] MUX1_OUT;
     assign MUX1_OUT = (MUX_NEG_SEL) ? NEGATED_REGOUT2 : REGOUT2;
+
 
     // MUX 2: select between MUX1_OUT and IMMEDIATE
     //   MUX_IMM_SEL = 0  ->  MUX1_OUT   (register instructions)
     //   MUX_IMM_SEL = 1  ->  IMMEDIATE  (loadi)
-   
     wire [7:0] ALU_DATA2;
     assign ALU_DATA2 = (MUX_IMM_SEL) ? IMMEDIATE : MUX1_OUT;
 
 
     // ALU instantiation
-    // DATA1 = REGOUT1 (always from RT)
-    // DATA2 = ALU_DATA2 (either register, negated register, or immediate)
-    
     alu myalu(
         .DATA1  (REGOUT1),
         .DATA2  (ALU_DATA2),
         .RESULT (ALURESULT),
-        .SELECT (ALUOP)
+        .SELECT (ALUOP),
+        .ZERO   (ZERO)
     );
 
 
@@ -139,72 +172,68 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
     begin
 
         // Default: safe values that cause no side effects
-        WRITEENABLE  = 1'b0;
-        MUX_IMM_SEL  = 1'b0;
-        MUX_NEG_SEL  = 1'b0;
-        ALUOP        = 3'b000;
+        WRITEENABLE = 1'b0;
+        MUX_IMM_SEL = 1'b0;
+        MUX_NEG_SEL = 1'b0;
+        ALUOP       = 3'b000;
+        JUMP        = 1'b0;
+        BRANCH      = 1'b0;
 
         // Apply decode latency of 1 time unit
         #1;
 
         case (OPCODE)
 
-            //------------------------------------------------------------------
             // loadi  RD, IMM
             // Load the 8-bit immediate (bits [7:0]) into register RD.
             // ALU forwards IMMEDIATE directly (MUX_IMM_SEL=1, ALUOP=000).
-            //------------------------------------------------------------------
+            
             8'b00000000:
             begin
                 WRITEENABLE = 1'b1;
-                MUX_IMM_SEL = 1'b1;   // pick IMMEDIATE as ALU DATA2
+                MUX_IMM_SEL = 1'b1;   // route immediate into ALU DATA2
                 MUX_NEG_SEL = 1'b0;
-                ALUOP       = 3'b000;  // forward DATA2 -> ALURESULT = IMMEDIATE
+                ALUOP       = 3'b000;  // forward DATA2
             end
 
-            //------------------------------------------------------------------
             // mov  RD, RT
             // Copy the value in register RT to register RD.
             // RS bits are ignored. ALU forwards REGOUT1 through forward unit.
-            //------------------------------------------------------------------
+            
             8'b00000001:
             begin
                 WRITEENABLE = 1'b1;
-                MUX_IMM_SEL = 1'b0;   // use register path
-                MUX_NEG_SEL = 1'b0;   // no negation
-                ALUOP       = 3'b000;  // forward DATA2 (REGOUT2) -> ALURESULT
+                MUX_IMM_SEL = 1'b0;
+                MUX_NEG_SEL = 1'b0;
+                ALUOP       = 3'b000;  // forward DATA2 (REGOUT2 holds RT)
             end
 
-            //------------------------------------------------------------------
             // add  RD, RT, RS
             // ALURESULT = REGOUT1 + REGOUT2
-            //------------------------------------------------------------------
             8'b00000010:
             begin
                 WRITEENABLE = 1'b1;
                 MUX_IMM_SEL = 1'b0;
-                MUX_NEG_SEL = 1'b0;   // use REGOUT2 as-is
-                ALUOP       = 3'b001;  // addition
+                MUX_NEG_SEL = 1'b0;
+                ALUOP       = 3'b001;  // add
             end
 
-            //------------------------------------------------------------------
             // sub  RD, RT, RS
             // ALURESULT = REGOUT1 - REGOUT2 = REGOUT1 + (~REGOUT2 + 1)
             // We negate REGOUT2 using the two's complement unit,
             // then feed the result to the adder.
-            //------------------------------------------------------------------
+            
             8'b00000011:
             begin
                 WRITEENABLE = 1'b1;
                 MUX_IMM_SEL = 1'b0;
-                MUX_NEG_SEL = 1'b1;   // two's complement REGOUT2 before ALU
-                ALUOP       = 3'b001;  // addition (of negated second operand)
+                MUX_NEG_SEL = 1'b1;   // negate REGOUT2
+                ALUOP       = 3'b001;  // add (of negated operand)
             end
 
-            //------------------------------------------------------------------
             // and  RD, RT, RS
             // ALURESULT = REGOUT1 & REGOUT2
-            //------------------------------------------------------------------
+            
             8'b00000100:
             begin
                 WRITEENABLE = 1'b1;
@@ -213,10 +242,9 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
                 ALUOP       = 3'b010;  // bitwise AND
             end
 
-            //------------------------------------------------------------------
             // or  RD, RT, RS
             // ALURESULT = REGOUT1 | REGOUT2
-            //------------------------------------------------------------------
+            
             8'b00000101:
             begin
                 WRITEENABLE = 1'b1;
@@ -225,15 +253,49 @@ module cpu(PC, INSTRUCTION, CLK, RESET);
                 ALUOP       = 3'b011;  // bitwise OR
             end
 
-            //------------------------------------------------------------------
+            // j  OFFSET
+            // Unconditional jump: PC = (PC+4) + sign_ext(OFFSET) * 4
+            // Bits [15:0] are ignored.  OFFSET is in RD_ADDR (bits [23:16]).
+            // WRITEENABLE stays 0 – no register is modified.
+            // JUMP = 1 forces PC_SEL high, overriding the sequential path.
+
+            8'b00000110:
+            begin
+                WRITEENABLE = 1'b0;
+                MUX_IMM_SEL = 1'b0;
+                MUX_NEG_SEL = 1'b0;
+                ALUOP       = 3'b000;  // ALU not used – forward is harmless
+                JUMP        = 1'b1;    // take the branch/jump target unconditionally
+                BRANCH      = 1'b0;
+            end
+
+            // beq  OFFSET, RT, RS
+            // Branch if RT == RS: PC = (PC+4) + sign_ext(OFFSET) * 4
+            // RT == RS is detected by subtracting RS from RT and checking ZERO.
+            // OFFSET is in RD_ADDR (bits [23:16]).
+            // WRITEENABLE stays 0 – registers are compared, not written.
+            // BRANCH = 1 enables the ZERO check in the PC mux.
+
+            8'b00000111:
+            begin
+                WRITEENABLE = 1'b0;
+                MUX_IMM_SEL = 1'b0;
+                MUX_NEG_SEL = 1'b1;   // negate RS so ALU computes RT - RS
+                ALUOP       = 3'b001;  // subtract to produce ZERO flag
+                JUMP        = 1'b0;
+                BRANCH      = 1'b1;   // branch if ALU result is zero
+            end
+
             // Default: unrecognised opcode -- do nothing, don't write
-            //------------------------------------------------------------------
+            
             default:
             begin
                 WRITEENABLE = 1'b0;
                 MUX_IMM_SEL = 1'b0;
                 MUX_NEG_SEL = 1'b0;
                 ALUOP       = 3'b000;
+                JUMP        = 1'b0;
+                BRANCH      = 1'b0;
             end
 
         endcase
