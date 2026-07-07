@@ -111,16 +111,15 @@ begin
 
     // Write operation
 
-    else if(WRITE)
-
+    else
     begin
-
-        // write delay
-        #1;
-
-        // write input data into selected register
-        registers[INADDRESS] = IN;
-
+        #1;              // let WRITE settle before sampling it (avoids race with MEM_BUSYWAIT)
+        if(WRITE)
+        begin
+            // write delay
+            #1;
+            registers[INADDRESS] = IN;
+        end
     end
 
 end

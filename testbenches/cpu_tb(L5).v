@@ -150,6 +150,32 @@ module cpu_tb;
         end
     endtask
 
+    // Task: check an actual value against expected and print PASS/FAIL
+
+    task check_reg;
+        input [127:0] name;
+        input [2:0]   regnum;
+        input [7:0]   expected;
+        begin
+            if (dut.rf.registers[regnum] !== expected)
+                $display("    FAIL: %0s = 0x%h, expected 0x%h", name, dut.rf.registers[regnum], expected);
+            else
+                $display("    PASS: %0s = 0x%h", name, dut.rf.registers[regnum]);
+        end
+    endtask
+
+    task check_mem;
+        input [127:0] name;
+        input [7:0]   addr;
+        input [7:0]   expected;
+        begin
+            if (dmem.memory_array[addr] !== expected)
+                $display("    FAIL: %0s = 0x%h, expected 0x%h", name, dmem.memory_array[addr], expected);
+            else
+                $display("    PASS: %0s = 0x%h", name, dmem.memory_array[addr]);
+        end
+    endtask
+
     //  Test: initialise instruction memory then reset and run
 
     initial
@@ -287,50 +313,74 @@ module cpu_tb;
         // Wait for loadi r1 (1 cycle) + swi (6 cycles) = 7 cycles
         repeat(7) @(posedge CLK);
         $display("[TIME=%0t] INSTR 1 DONE: swi r1(=0x42), addr=0x10 --> mem[0x10] should = 0x42", $time);
+        #5;
+        check_mem("mem[0x10]", 8'h10, 8'h42);
 
         // ── Program 1: lwi r2, 0x10 ───────────────────────────────────────
         repeat(6) @(posedge CLK);
         $display("[TIME=%0t] INSTR 2 DONE: lwi r2, addr=0x10 --> r2 should = 0x42", $time);
+        #5;
+        check_reg("r2", 3'd2, 8'h42);
 
         // ── Program 1: loadi r3 + swi r3, 0x20 ───────────────────────────
         repeat(7) @(posedge CLK);
         $display("[TIME=%0t] INSTR 4 DONE: swi r3(=0x99), addr=0x20 --> mem[0x20] should = 0x99", $time);
+        #5;
+        check_mem("mem[0x20]", 8'h20, 8'h99);
 
         // ── Program 1: lwi r4, 0x20 ───────────────────────────────────────
         repeat(6) @(posedge CLK);
         $display("[TIME=%0t] INSTR 5 DONE: lwi r4, addr=0x20 --> r4 should = 0x99", $time);
+        #5;
+        check_reg("r4", 3'd4, 8'h99);
 
         // ── Program 2: loadi r5 + loadi r6 + swd r6,r5 ───────────────────
         repeat(8) @(posedge CLK);
         $display("[TIME=%0t] INSTR 8 DONE: swd r6(=0xAB), r5(=0x30) --> mem[0x30] should = 0xAB", $time);
+        #5;
+        check_mem("mem[0x30]", 8'h30, 8'hAB);
 
         // ── Program 2: lwd r7, r5 ─────────────────────────────────────────
         repeat(6) @(posedge CLK);
         $display("[TIME=%0t] INSTR 9 DONE: lwd r7, r5(=0x30) --> r7 should = 0xAB", $time);
+        #5;
+        check_reg("r7", 3'd7, 8'hAB);
 
         // ── Program 3: loadi r1 + loadi r2 + add r3 + swi r3,0x50 ────────
         repeat(10) @(posedge CLK);
         $display("[TIME=%0t] INSTR 13 DONE: swi r3(=0x20), addr=0x50 --> mem[0x50] should = 0x20", $time);
+        #5;
+        check_mem("mem[0x50]", 8'h50, 8'h20);
 
         // ── Program 3: lwi r0, 0x50 ───────────────────────────────────────
         repeat(6) @(posedge CLK);
         $display("[TIME=%0t] INSTR 14 DONE: lwi r0, addr=0x50 --> r0 should = 0x20", $time);
+        #5;
+        check_reg("r0", 3'd0, 8'h20);
 
         // ── Program 4: loadi r1 + swi r1,0x60 ────────────────────────────
         repeat(7) @(posedge CLK);
         $display("[TIME=%0t] INSTR 16 DONE: swi r1(=0x01), addr=0x60 --> mem[0x60] should = 0x01", $time);
+        #5;
+        check_mem("mem[0x60]", 8'h60, 8'h01);
 
         // ── Program 4: lwi r2, 0x60 ───────────────────────────────────────
         repeat(6) @(posedge CLK);
         $display("[TIME=%0t] INSTR 17 DONE: lwi r2, addr=0x60 --> r2 should = 0x01", $time);
+        #5;
+        check_reg("r2", 3'd2, 8'h01);
 
         // ── Program 4: loadi r3 + add r4 + swi r4,0x61 ───────────────────
         repeat(9) @(posedge CLK);
         $display("[TIME=%0t] INSTR 20 DONE: swi r4(=0x0A), addr=0x61 --> mem[0x61] should = 0x0A", $time);
+        #5;
+        check_mem("mem[0x61]", 8'h61, 8'h0A);
 
         // ── Program 4: lwi r5, 0x61 ───────────────────────────────────────
         repeat(6) @(posedge CLK);
         $display("[TIME=%0t] INSTR 21 DONE: lwi r5, addr=0x61 --> r5 should = 0x0A", $time);
+        #5;
+        check_reg("r5", 3'd5, 8'h0A);
 
         $display("----------------------------------------------------");
         $display("Simulation complete. Check waveform for verification.");
