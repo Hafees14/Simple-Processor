@@ -1,7 +1,12 @@
-// Computer Architecture CO2070 - Lab 05
-// Design: Top-Level CPU Module with Data Memory Support
+// Computer Architecture CO2070 - Lab 07
+// Design: Top-Level CPU Module with Data Memory + Instruction Cache Support
 // Team  : 06
 // Members : E/22/014, E/22/035, E/22/034, E/22/036
+//
+// Lab 7 change: added IFETCH_BUSYWAIT input (from the new instruction
+// cache) which now jointly gates PC advancement and register-file writes
+// alongside MEM_BUSYWAIT (see STALL below). No new instructions were
+// introduced - the ISA is unchanged from Lab 5.
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  OPCODE TABLE
@@ -63,7 +68,9 @@ module cpu(
     MEM_ADDRESS,    // 8-bit address sent to data memory
     MEM_WRITEDATA,  // 8-bit data to store (from RT register)
     MEM_READDATA,   // 8-bit data read back from memory
-    MEM_BUSYWAIT    // memory stall: 1 while operation is in progress
+    MEM_BUSYWAIT,   // memory stall: 1 while operation is in progress
+    // ── Lab 7: Instruction Cache Interface ───────────────────────────────────
+    IFETCH_BUSYWAIT // instruction-cache stall: 1 while a fetch is in progress
 );
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -83,6 +90,15 @@ module cpu(
     output  [7:0] MEM_WRITEDATA;
     input   [7:0] MEM_READDATA;
     input         MEM_BUSYWAIT;
+    input         IFETCH_BUSYWAIT;
+
+    // Combined stall: freeze PC and gate register writes whenever EITHER
+    // the data cache (Lab 6) or the instruction cache (Lab 7) is busy.
+    // While IFETCH_BUSYWAIT is high, INSTRUCTION itself may not even be
+    // valid yet, so OPCODE-derived control signals could glitch - but
+    // since PC stays frozen and writes stay gated below, none of that
+    // can leak into architectural state.
+    wire STALL = MEM_BUSYWAIT | IFETCH_BUSYWAIT;
 
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -139,10 +155,12 @@ module cpu(
     assign REG_WRITEDATA = MEM_TO_REG ? MEM_READDATA : ALURESULT;
 
     // Write-enable gate:
-    // Suppress ALL register writes while memory is busy (READDATA not valid yet).
-    // Without this gate, the register file would write garbage on every stall cycle.
+    // Suppress ALL register writes while memory OR the instruction fetch
+    // is busy (READDATA not valid yet, or OPCODE not even reliable yet).
+    // Without this gate, the register file would write garbage on every
+    // stall cycle.
     wire WRITE_GATED;
-    assign WRITE_GATED = WRITEENABLE & ~MEM_BUSYWAIT;
+    assign WRITE_GATED = WRITEENABLE & ~STALL;
 
     reg_file rf(
         .IN          (REG_WRITEDATA),
@@ -234,11 +252,12 @@ module cpu(
     wire PC_SEL;
     assign PC_SEL = JUMP | (BRANCH & ZERO) | (BRANCH_NE & ~ZERO);
 
-    // STALL: while BUSYWAIT is high, keep PC unchanged (re-present same instruction)
+    // While STALL is high (data-memory OR instruction-cache busy), keep PC
+    // unchanged so the same instruction/address keeps being re-presented.
     wire [31:0] PC_NEXT;
-    assign PC_NEXT = MEM_BUSYWAIT ? PC           :
-                     PC_SEL       ? BRANCH_TARGET :
-                                    PC_PLUS4;
+    assign PC_NEXT = STALL  ? PC            :
+                     PC_SEL ? BRANCH_TARGET :
+                              PC_PLUS4;
 
     pc mypc(
         .PC    (PC),

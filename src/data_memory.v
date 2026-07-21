@@ -1,7 +1,7 @@
 /*
 Module	: 256x8-bit data memory (4-Byte blocks)
 Author	: Isuru Nawinne
-Date    : 30/05/2020
+Date    	: 30/05/2020
 
 Description	:
 
