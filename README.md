@@ -110,4 +110,4 @@ gtkwave "testbenches/cpu_cache_waves(L6).vcd"
 ## Team
 
 Group 06 — University of Peradeniya, Department of Computer Engineering (Batch E22)
-E/22/014 · E/22/034 · E/22/035 · E/22/036
+· E/22/014   · E/22/035  
